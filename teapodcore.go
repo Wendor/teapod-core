@@ -1,0 +1,464 @@
+//go:build android
+
+package teapodcore
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	coreapplog "github.com/xtls/xray-core/app/log"
+	corecommlog "github.com/xtls/xray-core/common/log"
+	corenet "github.com/xtls/xray-core/common/net"
+	corefilesystem "github.com/xtls/xray-core/common/platform/filesystem"
+	"github.com/xtls/xray-core/common/serial"
+	core "github.com/xtls/xray-core/core"
+	corestats "github.com/xtls/xray-core/features/stats"
+	coreserial "github.com/xtls/xray-core/infra/conf/serial"
+	_ "github.com/xtls/xray-core/main/distro/all"
+	"github.com/xtls/xray-core/transport/internet"
+	mobasset "golang.org/x/mobile/asset"
+
+	tun2socks "github.com/Wendor/teapod-tun2socks"
+)
+
+// --- INTERFACES (gomobile-visible) ---
+
+// VpnProtector protects outbound sockets so they bypass the VPN tunnel.
+// Implement using Android's VpnService.protect(fd) to prevent routing loops.
+type VpnProtector interface {
+	Protect(fd int) bool
+}
+
+// XrayCallback receives status updates from xray-core.
+type XrayCallback interface {
+	OnStatus(status int64, message string)
+}
+
+// TunValidator is called for each new connection through the TUN interface.
+// Return true to allow the connection, false to deny it.
+type TunValidator interface {
+	OnValidate(srcIP string, srcPort int64, dstIP string, dstPort int64, protocol int64) bool
+}
+
+// ProcessFinder resolves the UID of the process owning a given connection.
+// Used for per-app routing rules in xray-core.
+type ProcessFinder interface {
+	FindProcessByConnection(network, srcIP string, srcPort int64, destIP string, destPort int64) int64
+}
+
+// --- INTERNAL XRAY STATE ---
+
+type xrayEngine struct {
+	mu           sync.Mutex
+	instance     *core.Instance
+	statsManager corestats.Manager
+	isRunning    bool
+	cb           XrayCallback
+}
+
+var (
+	xray            *xrayEngine
+	tun2socksEngine *tun2socks.TeapodTun2socks
+)
+
+// --- XRAY: INTERNAL HELPERS ---
+
+type consoleLogWriter struct {
+	logger *log.Logger
+}
+
+func (w *consoleLogWriter) Write(s string) error {
+	w.logger.Print(s)
+	return nil
+}
+
+func (w *consoleLogWriter) Close() error { return nil }
+
+func newStdoutLogWriterCreator() corecommlog.WriterCreator {
+	return func() corecommlog.Writer {
+		return &consoleLogWriter{logger: log.New(os.Stdout, "", 0)}
+	}
+}
+
+func registerLogHandler() {
+	if err := coreapplog.RegisterHandlerCreator(
+		coreapplog.LogType_Console,
+		func(lt coreapplog.LogType, options coreapplog.HandlerCreatorOptions) (corecommlog.Handler, error) {
+			return corecommlog.NewLogger(newStdoutLogWriterCreator()), nil
+		},
+	); err != nil {
+		log.Printf("Failed to register xray log handler: %v", err)
+	}
+}
+
+// --- PUBLIC API: INIT ---
+
+// InitCoreEnv sets up asset/cert paths and the optional XUDP base key.
+// envPath should point to the directory containing geoip.dat and geosite.dat.
+func InitCoreEnv(envPath string, key string) {
+	if envPath != "" {
+		if err := os.Setenv("xray.location.asset", envPath); err != nil {
+			log.Printf("Failed to set xray.location.asset: %v", err)
+		}
+		if err := os.Setenv("xray.location.cert", envPath); err != nil {
+			log.Printf("Failed to set xray.location.cert: %v", err)
+		}
+	}
+	if key != "" {
+		if err := os.Setenv("xray.xudp.basekey", key); err != nil {
+			log.Printf("Failed to set xray.xudp.basekey: %v", err)
+		}
+	}
+	corefilesystem.NewFileReader = func(path string) (io.ReadCloser, error) {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			_, file := filepath.Split(path)
+			return mobasset.Open(file)
+		}
+		return os.Open(path)
+	}
+}
+
+// --- PUBLIC API: VPN PROTECTOR ---
+
+// RegisterVpnProtector registers a socket protector called for every outbound
+// socket xray-core opens. Call this before StartXray. Pass nil to unregister.
+func RegisterVpnProtector(p VpnProtector) {
+	if p == nil {
+		internet.RegisterDialerController(nil)
+		return
+	}
+	internet.RegisterDialerController(func(network, address string, conn syscall.RawConn) error {
+		return conn.Control(func(fd uintptr) {
+			p.Protect(int(fd))
+		})
+	})
+}
+
+// --- PUBLIC API: XRAY ---
+
+// StartXray starts xray-core with the provided JSON config.
+// If xray is already running it is stopped first, so the callback
+// is always tied to the current call.
+func StartXray(config string, cb XrayCallback) {
+	StopXray()
+
+	registerLogHandler()
+
+	eng := &xrayEngine{cb: cb}
+	xray = eng
+
+	go func() {
+		eng.mu.Lock()
+		defer eng.mu.Unlock()
+
+		log.Println("[xray] initializing core...")
+		cfg, err := coreserial.LoadJSONConfig(strings.NewReader(config))
+		if err != nil {
+			log.Printf("[xray] config error: %v", err)
+			if cb != nil {
+				cb.OnStatus(-1, fmt.Sprintf("config error: %v", err))
+			}
+			return
+		}
+
+		inst, err := core.New(cfg)
+		if err != nil {
+			log.Printf("[xray] core init failed: %v", err)
+			if cb != nil {
+				cb.OnStatus(-1, fmt.Sprintf("init failed: %v", err))
+			}
+			return
+		}
+
+		eng.statsManager, _ = inst.GetFeature(corestats.ManagerType()).(corestats.Manager)
+
+		log.Println("[xray] starting core...")
+		if err := inst.Start(); err != nil {
+			log.Printf("[xray] startup failed: %v", err)
+			if cb != nil {
+				cb.OnStatus(-1, fmt.Sprintf("startup failed: %v", err))
+			}
+			return
+		}
+
+		eng.instance = inst
+		eng.isRunning = true
+
+		log.Println("[xray] started successfully")
+		if cb != nil {
+			cb.OnStatus(0, "Started successfully, running")
+		}
+	}()
+}
+
+// StopXray stops xray-core and releases all resources.
+func StopXray() {
+	eng := xray
+	xray = nil
+	if eng == nil {
+		return
+	}
+
+	eng.mu.Lock()
+	defer eng.mu.Unlock()
+
+	if eng.instance != nil {
+		if err := eng.instance.Close(); err != nil {
+			log.Printf("[xray] shutdown error: %v", err)
+		}
+		eng.instance = nil
+	}
+	eng.isRunning = false
+	eng.statsManager = nil
+
+	if eng.cb != nil {
+		eng.cb.OnStatus(0, "Core stopped")
+	}
+}
+
+// GetXrayVersion returns the xray-core version string.
+func GetXrayVersion() string {
+	return fmt.Sprintf("xray-core v%s", core.Version())
+}
+
+// QueryXrayStats returns and resets the traffic counter for the given outbound
+// tag and direction ("uplink" or "downlink").
+func QueryXrayStats(tag string, direct string) int64 {
+	eng := xray
+	if eng == nil {
+		return 0
+	}
+	eng.mu.Lock()
+	sm := eng.statsManager
+	eng.mu.Unlock()
+
+	if sm == nil {
+		return 0
+	}
+	counter := sm.GetCounter(fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", tag, direct))
+	if counter == nil {
+		return 0
+	}
+	return counter.Set(0)
+}
+
+// MeasureXrayDelay measures latency through the running xray instance.
+// Returns milliseconds, or -1 on error.
+func MeasureXrayDelay(url string) (int64, error) {
+	eng := xray
+	if eng == nil {
+		return -1, errors.New("xray not running")
+	}
+	eng.mu.Lock()
+	inst := eng.instance
+	eng.mu.Unlock()
+
+	if inst == nil {
+		return -1, errors.New("xray instance not ready")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	return measureDelay(ctx, inst, url)
+}
+
+// MeasureOutboundDelay starts a temporary xray instance with the given config
+// to measure latency without affecting the running session.
+func MeasureOutboundDelay(config string, url string) (int64, error) {
+	cfg, err := coreserial.LoadJSONConfig(strings.NewReader(config))
+	if err != nil {
+		return -1, fmt.Errorf("config load error: %w", err)
+	}
+
+	cfg.Inbound = nil
+	var essential []*serial.TypedMessage
+	for _, app := range cfg.App {
+		switch app.Type {
+		case "xray.app.proxyman.OutboundConfig",
+			"xray.app.dispatcher.Config",
+			"xray.app.log.Config":
+			essential = append(essential, app)
+		}
+	}
+	cfg.App = essential
+
+	inst, err := core.New(cfg)
+	if err != nil {
+		return -1, fmt.Errorf("instance creation failed: %w", err)
+	}
+	if err := inst.Start(); err != nil {
+		return -1, fmt.Errorf("startup failed: %w", err)
+	}
+	defer inst.Close()
+	return measureDelay(context.Background(), inst, url)
+}
+
+// RegisterXrayProcessFinder registers a per-app UID resolver for xray-core routing.
+// Must be called after StartXray. Pass nil to unregister.
+func RegisterXrayProcessFinder(finder ProcessFinder) {
+	if finder == nil {
+		corenet.RegisterAndroidProcessFinder(nil)
+		return
+	}
+	corenet.RegisterAndroidProcessFinder(func(network, srcIP string, srcPort uint16, destIP string, destPort uint16) (uid int, name string, path string, err error) {
+		if destPort == 0 || destIP == "" {
+			return 0, "", "", fmt.Errorf("processFinder: no dest for %s %s:%d", network, srcIP, srcPort)
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				uid, name, path, err = 0, "", "", fmt.Errorf("processFinder panic: %v", r)
+			}
+		}()
+		uid = int(finder.FindProcessByConnection(network, srcIP, int64(srcPort), destIP, int64(destPort)))
+		if uid < 0 {
+			return 0, "", "", fmt.Errorf("processFinder: not found for %s %s:%d -> %s:%d", network, srcIP, srcPort, destIP, destPort)
+		}
+		return uid, fmt.Sprintf("%d", uid), "", nil
+	})
+}
+
+// measureDelay measures HTTP round-trip latency through a running core instance.
+func measureDelay(ctx context.Context, inst *core.Instance, url string) (int64, error) {
+	tr := &http.Transport{
+		TLSHandshakeTimeout: 6 * time.Second,
+		DisableKeepAlives:   false,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dest, err := corenet.ParseDestination(fmt.Sprintf("%s:%s", network, addr))
+			if err != nil {
+				return nil, err
+			}
+			return core.Dial(ctx, inst, dest)
+		},
+	}
+	client := &http.Client{Transport: tr, Timeout: 12 * time.Second}
+
+	if url == "" {
+		url = "https://www.google.com/generate_204"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return -1, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	var best int64 = -1
+	var lastErr error
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ctx.Done():
+			if best < 0 {
+				return -1, ctx.Err()
+			}
+			return best, nil
+		default:
+		}
+
+		start := time.Now()
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			lastErr = fmt.Errorf("unexpected status: %s", resp.Status)
+			continue
+		}
+
+		ms := time.Since(start).Milliseconds()
+		if best < 0 || ms < best {
+			best = ms
+		}
+	}
+	if best < 0 {
+		return -1, lastErr
+	}
+	return best, nil
+}
+
+// --- INTERNAL TUN2SOCKS WRAPPERS ---
+
+type tunValidatorWrapper struct {
+	validator TunValidator
+}
+
+func (w *tunValidatorWrapper) Validate(srcIP string, srcPort int, dstIP string, dstPort int, protocol int) bool {
+	if w.validator == nil {
+		return true
+	}
+	return w.validator.OnValidate(srcIP, int64(srcPort), dstIP, int64(dstPort), int64(protocol))
+}
+
+// --- PUBLIC API: TUN2SOCKS ---
+
+// StartTun2Socks starts the TUN-to-SOCKS bridge.
+//
+//   - tunFD       — file descriptor from VpnService.establish()
+//   - socksPort   — local port where xray-core listens for SOCKS5
+//   - socksUser   — SOCKS5 username (empty = no auth)
+//   - socksPass   — SOCKS5 password (empty = no auth)
+//   - validator   — per-connection allow/deny callback (nil = allow all)
+//
+// Returns an empty string on success, or an error message.
+func StartTun2Socks(tunFD int64, socksPort int64, socksUser string, socksPass string, validator TunValidator) string {
+	if tun2socksEngine == nil {
+		tun2socksEngine = tun2socks.NewTeapodTun2socks()
+	}
+	v := &tunValidatorWrapper{validator: validator}
+	return tun2socksEngine.Start(tunFD, "127.0.0.1", socksPort, socksUser, socksPass, 1000, 300, v)
+}
+
+// StopTun2Socks gracefully shuts down the TUN bridge.
+func StopTun2Socks() {
+	if tun2socksEngine != nil {
+		tun2socksEngine.Stop()
+	}
+}
+
+// IsTunRunning reports whether the TUN bridge is active.
+func IsTunRunning() bool {
+	return tun2socksEngine != nil && tun2socksEngine.IsRunning()
+}
+
+// GetTunCacheSize returns the number of entries in the validator's LRU cache.
+func GetTunCacheSize() int64 {
+	if tun2socksEngine == nil {
+		return 0
+	}
+	return tun2socksEngine.CacheSize()
+}
+
+// SetTunLogEnabled toggles verbose logging inside the TUN bridge.
+func SetTunLogEnabled(enabled bool) {
+	if tun2socksEngine != nil {
+		tun2socksEngine.SetLogEnabled(enabled)
+	}
+}
+
+// GetTunUploadBytes returns total bytes sent from device to the internet.
+func GetTunUploadBytes() int64 {
+	if tun2socksEngine == nil {
+		return 0
+	}
+	return tun2socksEngine.GetUploadBytes()
+}
+
+// GetTunDownloadBytes returns total bytes received from the internet to device.
+func GetTunDownloadBytes() int64 {
+	if tun2socksEngine == nil {
+		return 0
+	}
+	return tun2socksEngine.GetDownloadBytes()
+}

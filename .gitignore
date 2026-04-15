@@ -1,0 +1,11 @@
+# Build outputs
+outputs/
+*.aar
+*.jar
+
+# Go build cache and binaries
+/vendor/
+go/pkg/
+
+# macOS
+.DS_Store
