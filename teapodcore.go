@@ -26,6 +26,9 @@ import (
 	corestats "github.com/xtls/xray-core/features/stats"
 	coreserial "github.com/xtls/xray-core/infra/conf/serial"
 	_ "github.com/xtls/xray-core/main/distro/all"
+	_ "github.com/xtls/xray-core/proxy/hysteria"
+	_ "github.com/xtls/xray-core/proxy/shadowsocks_2022"
+	_ "github.com/xtls/xray-core/transport/internet/hysteria"
 	"github.com/xtls/xray-core/transport/internet"
 	mobasset "golang.org/x/mobile/asset"
 
