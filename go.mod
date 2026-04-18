@@ -51,7 +51,7 @@ require (
 )
 
 replace (
-	github.com/Wendor/teapod-tun2socks => /Users/wendor/git/teapod-tun2socks/go
+	github.com/Wendor/teapod-tun2socks => ../teapod-tun2socks/go
 	golang.org/x/net => golang.org/x/net v0.53.0
 	golang.org/x/sys => golang.org/x/sys v0.43.0
 	google.golang.org/grpc => google.golang.org/grpc v1.80.0

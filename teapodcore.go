@@ -72,6 +72,7 @@ type xrayEngine struct {
 
 var (
 	xray            *xrayEngine
+	tun2socksMu     sync.Mutex
 	tun2socksEngine *tun2socks.TeapodTun2socks
 )
 
@@ -409,59 +410,82 @@ func (w *tunValidatorWrapper) Validate(srcIP string, srcPort int, dstIP string, 
 // StartTun2Socks starts the TUN-to-SOCKS bridge.
 //
 //   - tunFD       — file descriptor from VpnService.establish()
+//   - mtu         — MTU of the TUN interface; must match VpnService.Builder.setMtu()
 //   - socksPort   — local port where xray-core listens for SOCKS5
 //   - socksUser   — SOCKS5 username (empty = no auth)
 //   - socksPass   — SOCKS5 password (empty = no auth)
 //   - validator   — per-connection allow/deny callback (nil = allow all)
 //
 // Returns an empty string on success, or an error message.
-func StartTun2Socks(tunFD int64, socksPort int64, socksUser string, socksPass string, validator TunValidator) string {
+func StartTun2Socks(tunFD int64, mtu int64, socksPort int64, socksUser string, socksPass string, validator TunValidator) string {
+	tun2socksMu.Lock()
 	if tun2socksEngine == nil {
 		tun2socksEngine = tun2socks.NewTeapodTun2socks()
 	}
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+
 	v := &tunValidatorWrapper{validator: validator}
-	return tun2socksEngine.Start(tunFD, "127.0.0.1", socksPort, socksUser, socksPass, 1000, 300, v)
+	return eng.Start(tunFD, mtu, "127.0.0.1", socksPort, socksUser, socksPass, 1000, 300, v)
 }
 
 // StopTun2Socks gracefully shuts down the TUN bridge.
 func StopTun2Socks() {
-	if tun2socksEngine != nil {
-		tun2socksEngine.Stop()
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng != nil {
+		eng.Stop()
 	}
 }
 
 // IsTunRunning reports whether the TUN bridge is active.
 func IsTunRunning() bool {
-	return tun2socksEngine != nil && tun2socksEngine.IsRunning()
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	return eng != nil && eng.IsRunning()
 }
 
 // GetTunCacheSize returns the number of entries in the validator's LRU cache.
 func GetTunCacheSize() int64 {
-	if tun2socksEngine == nil {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng == nil {
 		return 0
 	}
-	return tun2socksEngine.CacheSize()
+	return eng.CacheSize()
 }
 
 // SetTunLogEnabled toggles verbose logging inside the TUN bridge.
 func SetTunLogEnabled(enabled bool) {
-	if tun2socksEngine != nil {
-		tun2socksEngine.SetLogEnabled(enabled)
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng != nil {
+		eng.SetLogEnabled(enabled)
 	}
 }
 
 // GetTunUploadBytes returns total bytes sent from device to the internet.
 func GetTunUploadBytes() int64 {
-	if tun2socksEngine == nil {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng == nil {
 		return 0
 	}
-	return tun2socksEngine.GetUploadBytes()
+	return eng.GetUploadBytes()
 }
 
 // GetTunDownloadBytes returns total bytes received from the internet to device.
 func GetTunDownloadBytes() int64 {
-	if tun2socksEngine == nil {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng == nil {
 		return 0
 	}
-	return tun2socksEngine.GetDownloadBytes()
+	return eng.GetDownloadBytes()
 }
