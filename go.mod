@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/Wendor/teapod-tun2socks v0.0.0
-	github.com/xtls/xray-core v1.260327.0
+	github.com/xtls/xray-core v1.260327.1-0.20260413224940-14e8ecfacf33
 	golang.org/x/mobile v0.0.0-20260410095206-2cfb76559b7b
 )
 
