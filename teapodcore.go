@@ -417,7 +417,7 @@ func (w *tunValidatorWrapper) Validate(srcIP string, srcPort int, dstIP string, 
 //   - validator   — per-connection allow/deny callback (nil = allow all)
 //
 // Returns an empty string on success, or an error message.
-func StartTun2Socks(tunFD int64, mtu int64, socksPort int64, socksUser string, socksPass string, validator TunValidator) string {
+func StartTun2Socks(tunFD int64, mtu int64, socksPort int64, socksUser string, socksPass string, allowICMP bool, validator TunValidator) string {
 	tun2socksMu.Lock()
 	if tun2socksEngine == nil {
 		tun2socksEngine = tun2socks.NewTeapodTun2socks()
@@ -426,7 +426,7 @@ func StartTun2Socks(tunFD int64, mtu int64, socksPort int64, socksUser string, s
 	tun2socksMu.Unlock()
 
 	v := &tunValidatorWrapper{validator: validator}
-	return eng.Start(tunFD, mtu, "127.0.0.1", socksPort, socksUser, socksPass, 1000, 300, v)
+	return eng.Start(tunFD, mtu, "127.0.0.1", socksPort, socksUser, socksPass, allowICMP, 1000, 300, v)
 }
 
 // StopTun2Socks gracefully shuts down the TUN bridge.
