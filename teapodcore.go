@@ -460,15 +460,17 @@ func TunActiveConnections() int64 {
 	return eng.GetActiveConnections()
 }
 
-// LogTunStats emits a diagnostic log line with tunnel health metrics
+// GetTunStatsLine returns a diagnostic string with tunnel health metrics
 // (active connections, gVisor TCP counters, channel queue depth, byte counters, cache size).
-func LogTunStats() {
+// Log it via Kotlin's log() so the line ends up in vpn_log.txt and the Flutter UI.
+func GetTunStatsLine() string {
 	tun2socksMu.Lock()
 	eng := tun2socksEngine
 	tun2socksMu.Unlock()
-	if eng != nil {
-		eng.LogStats()
+	if eng == nil {
+		return ""
 	}
+	return eng.GetStatsLine()
 }
 
 // GetTunCacheSize returns the number of entries in the validator's LRU cache.
