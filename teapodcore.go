@@ -447,6 +447,30 @@ func IsTunRunning() bool {
 	return eng != nil && eng.IsRunning()
 }
 
+// TunActiveConnections returns the number of TCP connections currently being proxied
+// through tun2socks. A sustained spike (e.g. >200) after hours of uptime indicates
+// a gVisor connection leak that requires a reconnect.
+func TunActiveConnections() int64 {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng == nil {
+		return 0
+	}
+	return eng.GetActiveConnections()
+}
+
+// LogTunStats emits a diagnostic log line with tunnel health metrics
+// (active connections, gVisor TCP counters, channel queue depth, byte counters, cache size).
+func LogTunStats() {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng != nil {
+		eng.LogStats()
+	}
+}
+
 // GetTunCacheSize returns the number of entries in the validator's LRU cache.
 func GetTunCacheSize() int64 {
 	tun2socksMu.Lock()
