@@ -528,3 +528,17 @@ func GetTunLastRxActivityMs() int64 {
 	}
 	return eng.GetLastRxActivityMs()
 }
+
+// ForceTunCloseAllConnections closes all active proxied TCP connections in tun2socks.
+// Apps receive a connection reset and reconnect through a clean gVisor path.
+// Call on network-change events to prevent stale connections from surviving a
+// physical network switch. Returns the number of connections closed.
+func ForceTunCloseAllConnections() int64 {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng == nil {
+		return 0
+	}
+	return eng.ForceCloseAllConnections()
+}
