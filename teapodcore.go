@@ -515,3 +515,16 @@ func GetTunDownloadBytes() int64 {
 	}
 	return eng.GetDownloadBytes()
 }
+
+// GetTunLastRxActivityMs returns the Unix timestamp in milliseconds of the last
+// successful write to the TUN interface (i.e. last time data reached the device).
+// Returns 0 if tun2socks is not running or nothing has been written yet.
+func GetTunLastRxActivityMs() int64 {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng == nil {
+		return 0
+	}
+	return eng.GetLastRxActivityMs()
+}
