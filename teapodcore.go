@@ -414,10 +414,16 @@ func (w *tunValidatorWrapper) Validate(srcIP string, srcPort int, dstIP string, 
 //   - socksPort   — local port where xray-core listens for SOCKS5
 //   - socksUser   — SOCKS5 username (empty = no auth)
 //   - socksPass   — SOCKS5 password (empty = no auth)
+//   - allowICMP   — allow ICMP echo (ping) through the tunnel
+//   - blockQuic   — when true, intercept UDP/443 at the TUN level and reply with
+//                   ICMP Port Unreachable. The packet never leaves the device; the
+//                   browser sees the destination as unreachable for QUIC and falls
+//                   back to TCP through the tunnel immediately, avoiding the ~55s
+//                   QUIC handshake retransmission wait that silent dropping causes.
 //   - validator   — per-connection allow/deny callback (nil = allow all)
 //
 // Returns an empty string on success, or an error message.
-func StartTun2Socks(tunFD int64, mtu int64, socksPort int64, socksUser string, socksPass string, allowICMP bool, validator TunValidator) string {
+func StartTun2Socks(tunFD int64, mtu int64, socksPort int64, socksUser string, socksPass string, allowICMP bool, blockQuic bool, validator TunValidator) string {
 	tun2socksMu.Lock()
 	if tun2socksEngine == nil {
 		tun2socksEngine = tun2socks.NewTeapodTun2socks()
@@ -426,7 +432,7 @@ func StartTun2Socks(tunFD int64, mtu int64, socksPort int64, socksUser string, s
 	tun2socksMu.Unlock()
 
 	v := &tunValidatorWrapper{validator: validator}
-	return eng.Start(tunFD, mtu, "127.0.0.1", socksPort, socksUser, socksPass, allowICMP, 1000, 300, v)
+	return eng.Start(tunFD, mtu, "127.0.0.1", socksPort, socksUser, socksPass, allowICMP, blockQuic, 1000, 300, v)
 }
 
 // StopTun2Socks gracefully shuts down the TUN bridge.
