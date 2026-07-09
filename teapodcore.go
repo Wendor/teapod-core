@@ -479,6 +479,18 @@ func GetTunStatsLine() string {
 	return eng.GetStatsLine()
 }
 
+// GetTunDiagnostics returns a JSON snapshot of the tunnel state (health metrics,
+// failure counters, per-connection activity table). Empty string if not running.
+func GetTunDiagnostics() string {
+	tun2socksMu.Lock()
+	eng := tun2socksEngine
+	tun2socksMu.Unlock()
+	if eng == nil {
+		return ""
+	}
+	return eng.GetDiagnostics()
+}
+
 // GetTunCacheSize returns the number of entries in the validator's LRU cache.
 func GetTunCacheSize() int64 {
 	tun2socksMu.Lock()
