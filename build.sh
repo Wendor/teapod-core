@@ -46,7 +46,7 @@ build() {
         $GOMOBILE_BIN bind \
             -target="$target" \
             -androidapi=21 \
-            -ldflags='-s -w' \
+            -ldflags='-s -w -checklinkname=0' \
             -trimpath \
             -o "$output" \
             "$SCRIPT_DIR"
