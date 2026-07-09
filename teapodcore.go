@@ -71,10 +71,18 @@ type xrayEngine struct {
 }
 
 var (
+	// xrayMu guards the xray pointer itself; xrayEngine.mu guards its fields.
+	xrayMu          sync.Mutex
 	xray            *xrayEngine
 	tun2socksMu     sync.Mutex
 	tun2socksEngine *tun2socks.TeapodTun2socks
 )
+
+func currentXray() *xrayEngine {
+	xrayMu.Lock()
+	defer xrayMu.Unlock()
+	return xray
+}
 
 // --- XRAY: INTERNAL HELPERS ---
 
@@ -160,7 +168,9 @@ func StartXray(config string, cb XrayCallback) {
 	registerLogHandler()
 
 	eng := &xrayEngine{cb: cb}
+	xrayMu.Lock()
 	xray = eng
+	xrayMu.Unlock()
 
 	go func() {
 		eng.mu.Lock()
@@ -208,8 +218,10 @@ func StartXray(config string, cb XrayCallback) {
 
 // StopXray stops xray-core and releases all resources.
 func StopXray() {
+	xrayMu.Lock()
 	eng := xray
 	xray = nil
+	xrayMu.Unlock()
 	if eng == nil {
 		return
 	}
@@ -239,7 +251,7 @@ func GetXrayVersion() string {
 // QueryXrayStats returns and resets the traffic counter for the given outbound
 // tag and direction ("uplink" or "downlink").
 func QueryXrayStats(tag string, direct string) int64 {
-	eng := xray
+	eng := currentXray()
 	if eng == nil {
 		return 0
 	}
@@ -260,7 +272,7 @@ func QueryXrayStats(tag string, direct string) int64 {
 // MeasureXrayDelay measures latency through the running xray instance.
 // Returns milliseconds, or -1 on error.
 func MeasureXrayDelay(url string) (int64, error) {
-	eng := xray
+	eng := currentXray()
 	if eng == nil {
 		return -1, errors.New("xray not running")
 	}
