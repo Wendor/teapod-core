@@ -48,6 +48,13 @@ type XrayCallback interface {
 	OnStatus(status int64, message string)
 }
 
+// LogListener receives xray-core runtime log lines (error + access logs).
+// Without it these lines go only to Go's stdout, which is invisible on Android —
+// outbound dial failures (DPI resets, DNS errors) never reach vpn_log.txt.
+type LogListener interface {
+	OnLog(message string)
+}
+
 // TunValidator is called for each new connection through the TUN interface.
 // Return true to allow the connection, false to deny it.
 type TunValidator interface {
@@ -76,6 +83,8 @@ var (
 	xray            *xrayEngine
 	tun2socksMu     sync.Mutex
 	tun2socksEngine *tun2socks.TeapodTun2socks
+	logListenerMu   sync.Mutex
+	logListener     LogListener
 )
 
 func currentXray() *xrayEngine {
@@ -92,6 +101,12 @@ type consoleLogWriter struct {
 
 func (w *consoleLogWriter) Write(s string) error {
 	w.logger.Print(s)
+	logListenerMu.Lock()
+	l := logListener
+	logListenerMu.Unlock()
+	if l != nil {
+		l.OnLog(strings.TrimRight(s, "\n"))
+	}
 	return nil
 }
 
@@ -139,6 +154,14 @@ func InitCoreEnv(envPath string, key string) {
 		}
 		return os.Open(path)
 	}
+}
+
+// RegisterLogListener routes xray-core runtime logs to the host application
+// (e.g. Kotlin's log() → vpn_log.txt + Flutter UI). Pass nil to unregister.
+func RegisterLogListener(l LogListener) {
+	logListenerMu.Lock()
+	logListener = l
+	logListenerMu.Unlock()
 }
 
 // --- PUBLIC API: VPN PROTECTOR ---
