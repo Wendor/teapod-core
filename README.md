@@ -2,6 +2,20 @@
 
 Android VPN library that combines [xray-core](https://github.com/XTLS/Xray-core) and [teapod-tun2socks](https://github.com/Wendor/teapod-tun2socks) into a single AAR compiled via [gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile).
 
+## Two cores
+
+The fat AAR carries two independent VPN cores; the app picks one at runtime:
+
+- **Go** — xray-core + teapod-tun2socks (gomobile, package `teapodcore`).
+- **Rust** — [xray-rust](https://github.com/aimalygin/xray-rust) via the prebuilt
+  [xray-rust-mobile](https://github.com/aimalygin/xray-rust-mobile) AAR
+  (package `org.xrayrust.mobile`, `libxray_ffi.so` + `libxray_mobile_jni.so`).
+  `build.sh` downloads the pinned version (`XRAY_RUST_VERSION`), verifies its
+  SHA-256 and merges classes, proguard rules and the `arm64-v8a`/`x86_64`
+  libraries into the fat AAR. License: MPL-2.0, see `third_party/xray-rust/`.
+
+ABIs: `arm64-v8a`, `x86_64` (armeabi-v7a is not built).
+
 ## Architecture
 
 ```
@@ -107,7 +121,6 @@ gomobile init
 # Outputs:
 #   outputs/teapod-core-1.0.2.aar              ← fat AAR (all ABIs, use this)
 #   outputs/teapod-core-arm64-v8a-1.0.2.aar
-#   outputs/teapod-core-armeabi-v7a-1.0.2.aar
 #   outputs/teapod-core-x86_64-1.0.2.aar
 
 # Publish to GitHub

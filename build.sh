@@ -19,10 +19,16 @@ fi
 VERSION="${VERSION:-1.0.0}"
 
 # ── Архитектуры ──────────────────────────────────────────────────────────────
-ARCHS=("android/arm:armeabi-v7a" "android/arm64:arm64-v8a" "android/amd64:x86_64")
+ARCHS=("android/arm64:arm64-v8a" "android/amd64:x86_64")
 
 OUTPUT_DIR="$SCRIPT_DIR/outputs"
 mkdir -p "$OUTPUT_DIR"
+
+# ── Rust-ядро: готовый AAR xray-rust-mobile (собран upstream из xray-rust без патчей) ──
+XRAY_RUST_VERSION="0.9.0"
+XRAY_RUST_SHA256="8f882b5bba982bc0eb44439e1b02eb963299f8929dcfa93ec99246f6c7e78c50"
+XRAY_RUST_URL="https://github.com/aimalygin/xray-rust-mobile/releases/download/v${XRAY_RUST_VERSION}/xray-rust-mobile-${XRAY_RUST_VERSION}.aar"
+XRAY_RUST_AAR="$SCRIPT_DIR/.native/xray-rust-mobile-${XRAY_RUST_VERSION}.aar"
 
 # ── Цвета ────────────────────────────────────────────────────────────────────
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
@@ -32,7 +38,40 @@ err() { echo -e "${RED}✗ $*${NC}"; exit 1; }
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+fetch_xray_rust() {
+    mkdir -p "$(dirname "$XRAY_RUST_AAR")"
+    if [[ ! -f "$XRAY_RUST_AAR" ]] || [[ "$(shasum -a 256 "$XRAY_RUST_AAR" | cut -d' ' -f1)" != "$XRAY_RUST_SHA256" ]]; then
+        log "Downloading xray-rust-mobile $XRAY_RUST_VERSION..."
+        curl -fL --progress-bar "$XRAY_RUST_URL" -o "$XRAY_RUST_AAR.download"
+        [[ "$(shasum -a 256 "$XRAY_RUST_AAR.download" | cut -d' ' -f1)" == "$XRAY_RUST_SHA256" ]] \
+            || { rm -f "$XRAY_RUST_AAR.download"; err "xray-rust-mobile: SHA-256 mismatch"; }
+        mv "$XRAY_RUST_AAR.download" "$XRAY_RUST_AAR"
+    fi
+    ok "xray-rust-mobile $XRAY_RUST_VERSION (sha256 verified)"
+}
+
+# Добавляет в распакованный AAR Rust-ядро: .so для наших ABI, классы, proguard-правила.
+merge_xray_rust() {
+    local dest=$1
+    local rust_dir classes_dir
+    rust_dir=$(mktemp -d)
+    classes_dir=$(mktemp -d)
+    unzip -q "$XRAY_RUST_AAR" -d "$rust_dir"
+    for entry in "${ARCHS[@]}"; do
+        local abi="${entry#*:}"
+        mkdir -p "$dest/jni/$abi"
+        cp "$rust_dir/jni/$abi/libxray_ffi.so" "$rust_dir/jni/$abi/libxray_mobile_jni.so" "$dest/jni/$abi/"
+    done
+    (cd "$classes_dir" && unzip -qo "$dest/classes.jar" && unzip -qo "$rust_dir/classes.jar" -x 'META-INF/MANIFEST.MF')
+    rm "$dest/classes.jar"
+    (cd "$classes_dir" && zip -qr "$dest/classes.jar" .)
+    { [[ -f "$dest/proguard.txt" ]] && cat "$dest/proguard.txt"; echo; cat "$rust_dir/proguard.txt"; } > "$dest/proguard.txt.new"
+    mv "$dest/proguard.txt.new" "$dest/proguard.txt"
+    rm -rf "$rust_dir" "$classes_dir"
+}
+
 build() {
+    fetch_xray_rust
     log "Building teapod-core v$VERSION..."
 
     for entry in "${ARCHS[@]}"; do
@@ -55,7 +94,7 @@ build() {
     done
 
     echo "--------------------------------------------------"
-    log "Building fat AAR (all ABIs)..."
+    log "Building fat AAR (Go + Rust, all ABIs)..."
 
     local fat_aar="$OUTPUT_DIR/teapod-core-${VERSION}.aar"
     local tmp_dir
@@ -74,6 +113,9 @@ build() {
         fi
     done
 
+    merge_xray_rust "$tmp_dir"
+
+    rm -f "$fat_aar"
     (cd "$tmp_dir" && zip -r "$fat_aar" . -x "*.DS_Store" -q)
     rm -rf "$tmp_dir"
 
