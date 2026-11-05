@@ -127,7 +127,7 @@ gomobile init
 ./build.sh push
 ```
 
-Version is read from `../teapod-tun2socks/kotlin/gradle.properties`.
+Version is read from `../teapodstream/pubspec.yaml` (single version for teapodstream, teapod-core and teapod-tun2socks; bump it with `./build.sh bump X.Y.Z` in teapodstream).
 
 ## Adding to your project
 

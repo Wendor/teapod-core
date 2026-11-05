@@ -11,12 +11,11 @@ export ANDROID_HOME="/opt/homebrew/share/android-commandlinetools"
 export ANDROID_NDK_HOME="/opt/homebrew/share/android-commandlinetools/ndk/28.2.13676358"
 export PATH="/opt/homebrew/bin:/Users/wendor/go/bin:$ANDROID_HOME/platform-tools:$PATH"
 
-# ── Версия из teapod-tun2socks/kotlin/gradle.properties ──────────────────────
-TUN2SOCKS_PROPS="$SCRIPT_DIR/../teapod-tun2socks/kotlin/gradle.properties"
-if [[ -f "$TUN2SOCKS_PROPS" ]]; then
-    VERSION=$(grep "^libraryVersion" "$TUN2SOCKS_PROPS" | cut -d'=' -f2 | tr -d ' \r\n')
-fi
-VERSION="${VERSION:-1.0.0}"
+# ── Общая версия проекта — единственный источник: teapodstream/pubspec.yaml ──
+PUBSPEC="$SCRIPT_DIR/../teapodstream/pubspec.yaml"
+[[ -f "$PUBSPEC" ]] || { echo "Не найден $PUBSPEC (версия берётся из teapodstream)" >&2; exit 1; }
+VERSION=$(awk '/^version:/{split($2,v,"+"); print v[1]; exit}' "$PUBSPEC")
+[[ -n "$VERSION" ]] || { echo "Не удалось прочитать version из $PUBSPEC" >&2; exit 1; }
 
 # ── Архитектуры ──────────────────────────────────────────────────────────────
 ARCHS=("android/arm64:arm64-v8a" "android/amd64:x86_64")
@@ -90,6 +89,8 @@ build() {
     fetch_xray_rust
     prepare_xray_core
     log "Building teapod-core v$VERSION..."
+    # В outputs — только текущая версия: teapodstream берёт AAR строго по версии
+    rm -f "$OUTPUT_DIR"/teapod-core-*.aar "$OUTPUT_DIR"/teapod-core-*-sources.jar
 
     for entry in "${ARCHS[@]}"; do
         local target="${entry%%:*}"
