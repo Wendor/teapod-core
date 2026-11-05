@@ -10,3 +10,4 @@ go/pkg/
 # macOS
 .DS_Store
 .native/
+.xray-core/

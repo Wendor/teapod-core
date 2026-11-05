@@ -70,8 +70,25 @@ merge_xray_rust() {
     rm -rf "$rust_dir" "$classes_dir"
 }
 
+# xray-core собирается из кэша модулей с патчами patches/xray-core/*.patch
+# (go.mod: replace github.com/xtls/xray-core => ./.xray-core).
+prepare_xray_core() {
+    local version dir dest="$SCRIPT_DIR/.xray-core"
+    version=$(awk '$1=="github.com/xtls/xray-core"{print $2; exit}' "$SCRIPT_DIR/go.mod")
+    dir=$(cd "$SCRIPT_DIR" && $GO_BIN mod download -json "github.com/xtls/xray-core@$version" | awk -F'"' '$2=="Dir"{print $4}')
+    [[ -d "$dir" ]] || err "xray-core $version: модуль не скачан"
+    rm -rf "$dest"
+    cp -R "$dir" "$dest"
+    chmod -R u+w "$dest"
+    for p in "$SCRIPT_DIR"/patches/xray-core/*.patch; do
+        patch -p1 -s -d "$dest" < "$p" || err "Патч не применился: $(basename "$p")"
+    done
+    ok "xray-core $version (patched)"
+}
+
 build() {
     fetch_xray_rust
+    prepare_xray_core
     log "Building teapod-core v$VERSION..."
 
     for entry in "${ARCHS[@]}"; do
