@@ -379,6 +379,8 @@ func measureDelay(ctx context.Context, inst *core.Instance, url string) (int64, 
 			return core.Dial(ctx, inst, dest)
 		},
 	}
+	// Keep-alive соединение держит сессию outbound'а, а с ней — соединение к серверу.
+	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, Timeout: 12 * time.Second}
 
 	if url == "" {
