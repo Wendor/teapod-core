@@ -100,13 +100,15 @@ type consoleLogWriter struct {
 }
 
 func (w *consoleLogWriter) Write(s string) error {
-	w.logger.Print(s)
 	logListenerMu.Lock()
 	l := logListener
 	logListenerMu.Unlock()
 	if l != nil {
+		// The listener logs to logcat itself; stdout would duplicate every line.
 		l.OnLog(strings.TrimRight(s, "\n"))
+		return nil
 	}
+	w.logger.Print(s)
 	return nil
 }
 
@@ -198,6 +200,16 @@ func StartXray(config string, cb XrayCallback) {
 	go func() {
 		eng.mu.Lock()
 		defer eng.mu.Unlock()
+
+		// StopXray could take eng.mu before this goroutine: it found no instance and
+		// returned, so a core started now would be orphaned — never closed, holding
+		// the SOCKS port and its upstream connections.
+		if currentXray() != eng {
+			if cb != nil {
+				cb.OnStatus(-1, "start cancelled: core was stopped")
+			}
+			return
+		}
 
 		log.Println("[xray] initializing core...")
 		cfg, err := coreserial.LoadJSONConfig(strings.NewReader(config))
@@ -323,9 +335,11 @@ func MeasureOutboundDelay(config string, url string) (int64, error) {
 	var essential []*serial.TypedMessage
 	for _, app := range cfg.App {
 		switch app.Type {
+		// No xray.app.log.Config: log.New registers the instance as the global
+		// handler, and after Close the handler is inactive — the running VPN core
+		// would stop logging until its next start.
 		case "xray.app.proxyman.OutboundConfig",
-			"xray.app.dispatcher.Config",
-			"xray.app.log.Config":
+			"xray.app.dispatcher.Config":
 			essential = append(essential, app)
 		}
 	}
@@ -379,6 +393,8 @@ func measureDelay(ctx context.Context, inst *core.Instance, url string) (int64, 
 			return core.Dial(ctx, inst, dest)
 		},
 	}
+	// Keep-alive соединение держит сессию outbound'а, а с ней — соединение к серверу.
+	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, Timeout: 12 * time.Second}
 
 	if url == "" {
