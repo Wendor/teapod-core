@@ -173,7 +173,11 @@ push() {
         log "Релиз $tag уже существует, обновляю assets..."
         gh release upload "$tag" "${assets[@]}" --clobber
     else
-        local flags=("--title" "teapod-core $VERSION" "--generate-notes")
+        # Тег — на текущий коммит, а не на ветку по умолчанию (master)
+        local head
+        head=$(git -C "$SCRIPT_DIR" rev-parse HEAD)
+        [[ -n "$(git -C "$SCRIPT_DIR" branch -r --contains "$head")" ]] || err "Коммит $head не запушен — сначала git push"
+        local flags=("--title" "teapod-core $VERSION" "--generate-notes" "--target" "$head")
         [[ "$is_pre" == "true" ]] && flags+=("--prerelease")
         gh release create "$tag" "${flags[@]}" "${assets[@]}"
     fi
