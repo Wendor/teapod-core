@@ -3,13 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# ── Инструменты ──────────────────────────────────────────────────────────────
-GO_BIN="/opt/homebrew/bin/go"
-GOMOBILE_BIN="/Users/wendor/go/bin/gomobile"
+# ── Инструменты (по умолчанию — homebrew; на CI ANDROID_HOME и go из окружения) ──
+export ANDROID_HOME="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+export PATH="/opt/homebrew/bin:$HOME/go/bin:$ANDROID_HOME/platform-tools:$PATH"
 
-export ANDROID_HOME="/opt/homebrew/share/android-commandlinetools"
-export ANDROID_NDK_HOME="/opt/homebrew/share/android-commandlinetools/ndk/28.2.13676358"
-export PATH="/opt/homebrew/bin:/Users/wendor/go/bin:$ANDROID_HOME/platform-tools:$PATH"
+GO_BIN="go"
+GOMOBILE_BIN="$HOME/go/bin/gomobile"
 
 # ── Общая версия проекта — единственный источник: teapodstream/pubspec.yaml ──
 PUBSPEC="$SCRIPT_DIR/../teapodstream/pubspec.yaml"
