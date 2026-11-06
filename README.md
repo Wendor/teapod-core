@@ -2,9 +2,9 @@
 
 Android VPN library that combines [xray-core](https://github.com/XTLS/Xray-core) and [teapod-tun2socks](https://github.com/Wendor/teapod-tun2socks) into a single AAR compiled via [gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile).
 
-## Two cores
+## Cores
 
-The fat AAR carries two independent VPN cores; the app picks one at runtime:
+The fat AAR carries three independent VPN cores; the app picks one at runtime:
 
 - **Go** — xray-core + teapod-tun2socks (gomobile, package `teapodcore`).
 - **Rust** — [xray-rust](https://github.com/aimalygin/xray-rust) via the prebuilt
@@ -13,6 +13,11 @@ The fat AAR carries two independent VPN cores; the app picks one at runtime:
   `build.sh` downloads the pinned version (`XRAY_RUST_VERSION`), verifies its
   SHA-256 and merges classes, proguard rules and the `arm64-v8a`/`x86_64`
   libraries into the fat AAR. License: MPL-2.0, see `third_party/xray-rust/`.
+- **sing-box** — [sing-box](https://github.com/SagerNet/sing-box) v1.14.4 in the same
+  gomobile bind (`StartBox`/`StopBox`, `MeasureBoxDelay`, `MeasureBoxOutboundDelay`),
+  behind teapod-tun2socks like the Go core. Build tags: `TAGS` in `build.sh`
+  (NaiveProxy links Cronet statically). License: GPL-3.0-or-later with an
+  additional term on the name, see `third_party/sing-box/`.
 
 ABIs: `arm64-v8a`, `x86_64` (armeabi-v7a is not built).
 
@@ -143,4 +148,5 @@ Minimum SDK: **29** (Android 10) — required for `ConnectivityManager.getConnec
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) for this repository's own code. The built AAR links sing-box
+(GPL-3.0-or-later), so a distributed binary is covered by the GPL.
