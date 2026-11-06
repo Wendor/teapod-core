@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -382,65 +381,13 @@ func RegisterXrayProcessFinder(finder ProcessFinder) {
 
 // measureDelay measures HTTP round-trip latency through a running core instance.
 func measureDelay(ctx context.Context, inst *core.Instance, url string) (int64, error) {
-	tr := &http.Transport{
-		TLSHandshakeTimeout: 6 * time.Second,
-		DisableKeepAlives:   false,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			dest, err := corenet.ParseDestination(fmt.Sprintf("%s:%s", network, addr))
-			if err != nil {
-				return nil, err
-			}
-			return core.Dial(ctx, inst, dest)
-		},
-	}
-	// Keep-alive соединение держит сессию outbound'а, а с ней — соединение к серверу.
-	defer tr.CloseIdleConnections()
-	client := &http.Client{Transport: tr, Timeout: 12 * time.Second}
-
-	if url == "" {
-		url = "https://www.google.com/generate_204"
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return -1, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	var best int64 = -1
-	var lastErr error
-	for i := 0; i < 2; i++ {
-		select {
-		case <-ctx.Done():
-			if best < 0 {
-				return -1, ctx.Err()
-			}
-			return best, nil
-		default:
-		}
-
-		start := time.Now()
-		resp, err := client.Do(req)
+	return measureDelayVia(ctx, func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dest, err := corenet.ParseDestination(fmt.Sprintf("%s:%s", network, addr))
 		if err != nil {
-			lastErr = err
-			continue
+			return nil, err
 		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-			lastErr = fmt.Errorf("unexpected status: %s", resp.Status)
-			continue
-		}
-
-		ms := time.Since(start).Milliseconds()
-		if best < 0 || ms < best {
-			best = ms
-		}
-	}
-	if best < 0 {
-		return -1, lastErr
-	}
-	return best, nil
+		return core.Dial(ctx, inst, dest)
+	}, url)
 }
 
 // --- INTERNAL TUN2SOCKS WRAPPERS ---
