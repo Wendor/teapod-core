@@ -19,6 +19,8 @@ VERSION=$(awk '/^version:/{split($2,v,"+"); print v[1]; exit}' "$PUBSPEC")
 
 # ── Архитектуры ──────────────────────────────────────────────────────────────
 ARCHS=("android/arm64:arm64-v8a" "android/amd64:x86_64")
+# Теги sing-box (как в официальной Android-сборке libbox, без лишних сервисов)
+TAGS="with_gvisor,with_quic,with_wireguard,with_utls,with_naive_outbound,badlinkname,tfogo_checklinkname0"
 
 OUTPUT_DIR="$SCRIPT_DIR/outputs"
 mkdir -p "$OUTPUT_DIR"
@@ -103,6 +105,7 @@ build() {
         $GOMOBILE_BIN bind \
             -target="$target" \
             -androidapi=21 \
+            -tags="$TAGS" \
             -ldflags='-s -w -checklinkname=0' \
             -trimpath \
             -o "$output" \
