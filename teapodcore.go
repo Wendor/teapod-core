@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -274,6 +275,19 @@ func StopXray() {
 
 	if eng.cb != nil {
 		eng.cb.OnStatus(0, "Core stopped")
+	}
+}
+
+// DumpGoroutines returns stack traces of all goroutines (diagnostics of hangs:
+// xray, sing-box and tun2socks run in this process).
+func DumpGoroutines() string {
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			return string(buf[:n])
+		}
+		buf = make([]byte, 2*len(buf))
 	}
 }
 

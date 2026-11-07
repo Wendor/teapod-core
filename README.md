@@ -100,6 +100,7 @@ Teapodcore.startTun2Socks(fd, port, "", "", object : TunValidator {
 | `startXray(config, cb)` | Start xray-core with a JSON config string |
 | `stopXray()` | Stop xray-core |
 | `getXrayVersion()` | Returns the xray-core version string |
+| `dumpGoroutines()` | Stack traces of all Go goroutines (hang diagnostics) |
 | `queryXrayStats(tag, direction)` | Read and reset traffic counter for an outbound tag |
 | `measureXrayDelay(url)` | Latency test through the running instance (ms) |
 | `measureOutboundDelay(config, url)` | Latency test with a temporary instance |
