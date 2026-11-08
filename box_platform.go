@@ -85,12 +85,16 @@ func (s *boxPlatform) ReadWIFIState(ctx context.Context) adapter.WIFIState {
 	return adapter.WIFIState{}
 }
 
+// На Android sing-box ищет владельца каждого соединения всегда. За tun2socks
+// источник — 127.0.0.1, то есть мы сами: без платформенного поиска он лезет в
+// netlink, получает отказ SELinux и пишет «failed to search process» на каждое
+// соединение. Пустой владелец (UserId -1) отключает поиск без ошибок.
 func (s *boxPlatform) UsePlatformConnectionOwnerFinder() bool {
-	return false
+	return true
 }
 
 func (s *boxPlatform) FindConnectionOwner(request *adapter.FindConnectionOwnerRequest) (*adapter.ConnectionOwner, error) {
-	return nil, os.ErrInvalid
+	return &adapter.ConnectionOwner{UserId: -1}, nil
 }
 
 func (s *boxPlatform) UsePlatformNotification() bool {
