@@ -94,6 +94,10 @@ build() {
     # В outputs — только текущая версия: teapodstream берёт AAR строго по версии
     rm -f "$OUTPUT_DIR"/teapod-core-*.aar "$OUTPUT_DIR"/teapod-core-*-sources.jar
 
+    # Версия sing-box задаётся только через -X (иначе "unknown") — берём из go.mod.
+    local box_version
+    box_version=$(cd "$SCRIPT_DIR" && go list -m -f '{{.Version}}' github.com/sagernet/sing-box)
+
     for entry in "${ARCHS[@]}"; do
         local target="${entry%%:*}"
         local abi="${entry#*:}"
@@ -106,7 +110,7 @@ build() {
             -target="$target" \
             -androidapi=21 \
             -tags="$TAGS" \
-            -ldflags='-s -w -checklinkname=0' \
+            -ldflags="-s -w -checklinkname=0 -X github.com/sagernet/sing-box/constant.Version=${box_version#v}" \
             -trimpath \
             -o "$output" \
             "$SCRIPT_DIR"

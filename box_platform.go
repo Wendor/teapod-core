@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/netip"
 	"os"
+	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/dns"
@@ -22,6 +23,27 @@ import (
 
 type boxPlatform struct{}
 
+var (
+	protectMu sync.Mutex
+	protectFn func(fd int)
+)
+
+// setProtectFd задаёт VpnService.protect для сокетов sing-box (nil — снять).
+func setProtectFd(f func(fd int)) {
+	protectMu.Lock()
+	protectFn = f
+	protectMu.Unlock()
+}
+
+func protectFd(fd int) {
+	protectMu.Lock()
+	f := protectFn
+	protectMu.Unlock()
+	if f != nil {
+		f(fd)
+	}
+}
+
 func (s *boxPlatform) Initialize(networkManager adapter.NetworkManager) error {
 	return nil
 }
@@ -30,7 +52,11 @@ func (s *boxPlatform) UsePlatformAutoDetectInterfaceControl() bool {
 	return true
 }
 
+// Каждый исходящий сокет — через VpnService.protect, как у xray: голые Go-сокеты
+// идут мимо netd-хуков bionic и после смены сети (LTE → Wi-Fi) до конца linger
+// старой сети уходят не туда — первое QUIC-рукопожатие hysteria2 висит 15 с.
 func (s *boxPlatform) AutoDetectInterfaceControl(fd int) error {
+	protectFd(fd)
 	return nil
 }
 

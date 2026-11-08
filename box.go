@@ -73,6 +73,11 @@ func newBox(config string, dataDir string, logs bool) (*box.Box, context.CancelF
 		cancel()
 		return nil, nil, fmt.Errorf("config error: %w", err)
 	}
+	// Включает AutoDetectInterfaceControl (protect сокетов) для любого конфига.
+	if opts.Route == nil {
+		opts.Route = &option.RouteOptions{}
+	}
+	opts.Route.AutoDetectInterface = true
 	boxOpts := box.Options{Context: ctx, Options: opts}
 	if logs {
 		boxOpts.PlatformLogWriter = boxLogWriter{}
@@ -161,7 +166,7 @@ func StopBox() {
 
 // GetBoxVersion returns the sing-box version string.
 func GetBoxVersion() string {
-	return C.Version
+	return "sing-box v" + C.Version
 }
 
 // boxProxyDial — dial через outbound или endpoint прокси.

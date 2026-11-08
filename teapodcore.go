@@ -172,9 +172,11 @@ func RegisterLogListener(l LogListener) {
 // socket xray-core opens. Call this before StartXray. Pass nil to unregister.
 func RegisterVpnProtector(p VpnProtector) {
 	if p == nil {
+		setProtectFd(nil)
 		internet.RegisterDialerController(nil)
 		return
 	}
+	setProtectFd(func(fd int) { p.Protect(fd) })
 	internet.RegisterDialerController(func(network, address string, conn syscall.RawConn) error {
 		return conn.Control(func(fd uintptr) {
 			p.Protect(int(fd))
