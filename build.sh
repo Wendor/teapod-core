@@ -21,6 +21,9 @@ VERSION=$(awk '/^version:/{split($2,v,"+"); print v[1]; exit}' "$PUBSPEC")
 ARCHS=("android/arm64:arm64-v8a" "android/amd64:x86_64")
 # Теги sing-box (как в официальной Android-сборке libbox, без лишних сервисов)
 TAGS="with_gvisor,with_quic,with_wireguard,with_utls,with_naive_outbound,badlinkname,tfogo_checklinkname0"
+# cronet-go (NaiveProxy) линкует `#cgo LDFLAGS: -l:libcronet.a`; Go 1.27.4+ без allow-листа
+# отвергает такой флаг («invalid flag in #cgo LDFLAGS»).
+export CGO_LDFLAGS_ALLOW='-l:libcronet\.a'
 
 OUTPUT_DIR="$SCRIPT_DIR/outputs"
 mkdir -p "$OUTPUT_DIR"
