@@ -1,5 +1,7 @@
 # teapod-core
 
+> **Archived.** The code now lives in [Wendor/teapod-stream](https://github.com/Wendor/teapod-stream) under [`core/`](https://github.com/Wendor/teapod-stream/tree/master/core). Its full history is kept there; old releases here stay available. Issues and pull requests: in teapod-stream.
+
 Android VPN library that combines [xray-core](https://github.com/XTLS/Xray-core) and [teapod-tun2socks](https://github.com/Wendor/teapod-tun2socks) into a single AAR compiled via [gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile).
 
 ## Cores
